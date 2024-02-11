@@ -49,6 +49,7 @@ ETH_DMADescTypeDef  DMATxDscrTab[ETH_TX_DESC_CNT]; /* Ethernet Tx DMA Descriptor
 ETH_HandleTypeDef heth;
 
 UART_HandleTypeDef huart3;
+DMA_HandleTypeDef hdma_usart3_tx;
 
 PCD_HandleTypeDef hpcd_USB_OTG_FS;
 
@@ -59,11 +60,36 @@ PCD_HandleTypeDef hpcd_USB_OTG_FS;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_ETH_Init(void);
 static void MX_USART3_UART_Init(void);
 static void MX_USB_OTG_FS_PCD_Init(void);
 /* USER CODE BEGIN PFP */
+uint8_t TxData[10240];
+int countloop=0;
+int countinterrupt=0;
+int issent=1;
+int indx = 49; //'1'
+void HAL_UART_TxHalfCpltCallback(UART_HandleTypeDef *huart){
+	for (uint32_t i=0;i<5120;i++){
+		TxData[i] = indx;
+	}
+	indx++;
+}
 
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart){
+	for (uint32_t i=5120;i<10240;i++){
+		TxData[i] = indx;
+	}
+	indx++;
+	if(indx>=60){
+		HAL_UART_DMAStop(&huart3);
+
+	}
+
+	issent = 1;
+	countinterrupt++;
+}
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -99,22 +125,32 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_ETH_Init();
   MX_USART3_UART_Init();
   MX_USB_OTG_FS_PCD_Init();
   /* USER CODE BEGIN 2 */
-  char *str = "helloworld\n\r";
+//  char *str = "helloworld\n\r";
+  for(uint32_t i=0;i<10240;i++){
+	  if ((i!=10240-1) & (i!=10240-2))
+		  TxData[i] = i&(0xff);
+	  else if (i==10240-2)
+		  TxData[i] = '\r';
+	  else
+		  TxData[i] = '\n';
+  }
+  HAL_UART_Transmit_DMA(&huart3, TxData, 10240);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+	HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
+	HAL_Delay(500);
+	countloop++;
     /* USER CODE END WHILE */
-	  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_0);
-	  HAL_UART_Transmit(&huart3, (uint8_t*)str, strlen(str), HAL_MAX_DELAY);
-//	  printf("hello world");
-	  HAL_Delay(500);
+
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
@@ -279,6 +315,22 @@ static void MX_USB_OTG_FS_PCD_Init(void)
   /* USER CODE BEGIN USB_OTG_FS_Init 2 */
 
   /* USER CODE END USB_OTG_FS_Init 2 */
+
+}
+
+/**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA1_Stream3_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream3_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream3_IRQn);
 
 }
 
