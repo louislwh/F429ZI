@@ -19,7 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "string.h"
-
+#include <stdio.h>
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
@@ -50,6 +50,7 @@ ETH_HandleTypeDef heth;
 
 UART_HandleTypeDef huart3;
 DMA_HandleTypeDef hdma_usart3_tx;
+DMA_HandleTypeDef hdma_usart3_rx;
 
 PCD_HandleTypeDef hpcd_USB_OTG_FS;
 
@@ -66,10 +67,18 @@ static void MX_USART3_UART_Init(void);
 static void MX_USB_OTG_FS_PCD_Init(void);
 /* USER CODE BEGIN PFP */
 uint8_t TxData[10240];
+uint8_t RxData[256];
+uint8_t Final[4096];
 int countloop=0;
 int countinterrupt=0;
 int issent=1;
 int indx = 49; //'1'
+//int countfull = 0;
+int isSizeRxed = 0;
+uint32_t size = 0;
+int HTC=0;
+int FTC=0;
+int idx=0;
 void HAL_UART_TxHalfCpltCallback(UART_HandleTypeDef *huart){
 	for (uint32_t i=0;i<5120;i++){
 		TxData[i] = indx;
@@ -89,6 +98,42 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart){
 
 	issent = 1;
 	countinterrupt++;
+}
+
+//void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
+//	if (isSizeRxed == 0){
+//		size = ((RxData[0]-48)*1000) + ((RxData[1]-48)*100) + ((RxData[2]-48)*10) + ((RxData[2]-48));
+//		isSizeExed = 1;
+//		HAL_UART_Receive_DMA(&huart3, RxData, size);
+//	}
+//	else if (isSizeRxed == 1){
+//		isSizeRxed = 0;
+//		HAL_UART_Receive_DMA(&huart3, RxData, 4);
+//	}
+//}
+void HAL_UART_RxHalfCpltCallback(UART_HandleTypeDef *huart){
+		if (isSizeRxed == 0){
+			size = ((RxData[0]-48)*1000) + ((RxData[1]-48)*100) + ((RxData[2]-48)*10) + ((RxData[2]-48));
+			idx = 0;
+			memcpy(Final+idx, RxData+4, 124);
+			memset(RxData,'\0',128);
+			idx+=124;
+			isSizeRxed = 1;
+		}
+		else{
+			memcpy(Final+idx, RxData, 128);
+			memset(RxData, '\0', 128);
+			idx+=128;
+		}
+		HTC=1;
+		FTC=0;
+}
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart){
+	memcpy(Final+idx, RxData+128, 128);
+	memset(RxData+128, '\0', 128);
+	idx+=128;
+	HTC=0;
+	FTC=1;
 }
 /* USER CODE END PFP */
 
@@ -140,12 +185,39 @@ int main(void)
 		  TxData[i] = '\n';
   }
   HAL_UART_Transmit_DMA(&huart3, TxData, 10240);
+
+  HAL_UART_Receive_DMA(&huart3, RxData, 256);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+	if((size-idx)>0 && (size-idx)<128){
+		if(HTC==1){
+			strcpy((char*)Final+idx, (char*)(RxData+128));
+			idx = size;
+			isSizeRxed = 0;
+			HTC=0;
+			HAL_UART_DMAStop(&huart3);
+			HAL_UART_Transmit_DMA(&huart3, RxData, 256);
+		}
+		else if(FTC==1){
+			strcpy((char*)Final+idx, (char*)RxData);
+			idx = size;
+			isSizeRxed = 0;
+			FTC=0;
+			HAL_UART_DMAStop(&huart3);
+			HAL_UART_Transmit_DMA(&huart3, RxData, 256);
+		}
+	}
+	else if((idx==size)&& ((HTC==1)||(FTC==1))){
+			isSizeRxed = 0;
+			FTC=0;
+			HTC=0;
+			HAL_UART_DMAStop(&huart3);
+			HAL_UART_Transmit_DMA(&huart3, RxData, 256);
+	}
 	HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_14);
 	HAL_Delay(500);
 	countloop++;
@@ -328,6 +400,9 @@ static void MX_DMA_Init(void)
   __HAL_RCC_DMA1_CLK_ENABLE();
 
   /* DMA interrupt init */
+  /* DMA1_Stream1_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream1_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream1_IRQn);
   /* DMA1_Stream3_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Stream3_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Stream3_IRQn);
